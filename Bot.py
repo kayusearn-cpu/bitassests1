@@ -52,7 +52,8 @@ STEPS = {
         ]
     },
     "step_2": {
-        "video": f"{BASE_GH_URL}2.%20License%20activation.mp4",
+        # Updated specifically with your new bitassests1 URL
+        "video": "https://raw.githubusercontent.com/kayusearn-cpu/bitassests1/main/2.%20License%20activation%20(1).mp4",
         "text": (
             "<b>Step 2/6: BitAI License Activation</b>\n\n"
             "To unlock BitAI’s full auto AI trading, activate your BitAI License inside your BitAI app.\n"
