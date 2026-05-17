@@ -6,8 +6,12 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from flask import Flask
 
-# 1. Setup Logging
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+# 1. Setup Logging (This will show us exactly where it fails in Render)
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', 
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
 # --- CONSTANTS & LINKS ---
 BITAI_REGISTER = "https://app.bitai.com.sg/h5/#/pages/sign/sign?invite=888"
@@ -18,7 +22,7 @@ BINANCE_DOWNLOAD = "https://www.binance.com/en/download"
 FAQ_LINK = "https://bitai.app/faq"
 EMAIL_LINK = "mailto:info@bitai.app"
 
-# 2. Step Configuration (Text, Video File IDs, and Keyboards)
+# 2. Step Configuration
 STEPS = {
     "entry": {
         "video": "BAACAgQAAxkBAAIKLGoGYLkJgYymARdPzkg87KJqeqG8AAKnHwACygk4UBoeU5Ja1_HpOwQ",
@@ -123,15 +127,11 @@ STEPS = {
     }
 }
 
-# 3. Endless Reminder Task
+# 3. Reminder Loop
 async def reminder_loop(chat_id: int, context: ContextTypes.DEFAULT_TYPE):
-    """Background task to remind users every 6 hours endlessly."""
     try:
         while True:
-            # Wait 6 hours (21600 seconds)
-            await asyncio.sleep(21600)
-            
-            # Send the endless reminder message
+            await asyncio.sleep(21600) # 6 hours
             reminder_text = (
                 "🔔 <b>BitAI System Reminder</b>\n\n"
                 "Ensure your automated trading is fully set up and running smoothly. "
@@ -142,23 +142,22 @@ async def reminder_loop(chat_id: int, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("🚀 View Setup Steps", callback_data="step_1")],
                 [InlineKeyboardButton("💬 Contact support", url=WHATSAPP)]
             ]
-            
             await context.bot.send_message(
                 chat_id=chat_id,
                 text=reminder_text,
                 reply_markup=InlineKeyboardMarkup(reminder_keyboard),
                 parse_mode="HTML"
             )
-    except asyncio.CancelledError:
-        pass # Task was cancelled properly
     except Exception as e:
-        logging.error(f"Reminder loop error for {chat_id}: {e}")
+        logger.error(f"Reminder loop error for {chat_id}: {e}")
 
 # 4. Helper to send messages
 async def send_step_message(chat_id: int, step_key: str, context: ContextTypes.DEFAULT_TYPE):
-    step_data = STEPS[step_key]
+    step_data = STEPS.get(step_key)
+    if not step_data:
+        return
+        
     reply_markup = InlineKeyboardMarkup(step_data["keyboard"])
-    
     try:
         await context.bot.send_video(
             chat_id=chat_id,
@@ -169,10 +168,10 @@ async def send_step_message(chat_id: int, step_key: str, context: ContextTypes.D
             supports_streaming=True
         )
     except Exception as e:
-        logging.error(f"Error sending video for {step_key}: {e}")
+        logger.error(f"Error sending video for {step_key}: {e}")
         await context.bot.send_message(
             chat_id=chat_id,
-            text=f"<b>Notice:</b> Video loading... Please wait.\n\n{step_data['text']}",
+            text=f"<b>Notice:</b> Video loading issue.\n\n{step_data['text']}",
             reply_markup=reply_markup,
             parse_mode="HTML"
         )
@@ -180,12 +179,11 @@ async def send_step_message(chat_id: int, step_key: str, context: ContextTypes.D
 # 5. Handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
+    logger.info(f"User {chat_id} started the bot.")
     
-    # Initialize chat data dictionary if not exists
     if chat_id not in context.application.chat_data:
         context.application.chat_data[chat_id] = {}
 
-    # Start the endless 6-hour reminder loop ONLY if it hasn't been started already for this user
     if not context.application.chat_data[chat_id].get("reminder_active", False):
         context.application.chat_data[chat_id]["reminder_active"] = True
         asyncio.create_task(reminder_loop(chat_id, context))
@@ -209,32 +207,38 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
         await send_step_message(chat_id, query.data, context)
 
-# 6. Flask Health Check
+# 6. Flask setup
 flask_app = Flask(__name__)
 @flask_app.route('/')
-def health(): return "Bot is running with Endless Reminders & File IDs"
+def health(): return "Bot is actively running!"
 
-# 7. Runner
+# 7. Main Bot Function
 async def run_bot():
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    if not token:
+        logger.error("FATAL ERROR: TELEGRAM_BOT_TOKEN is missing from environment variables!")
+        return
+
     application = Application.builder().token(token).build()
-    
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(button_handler))
     
+    logger.info("Starting Telegram Bot Polling...")
     await application.initialize()
     await application.start()
     await application.updater.start_polling(drop_pending_updates=True)
     await asyncio.Event().wait()
 
 def main():
+    logger.info("Starting Web Server...")
     threading.Thread(target=lambda: flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000))), daemon=True).start()
+    
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
         loop.run_until_complete(run_bot())
-    except KeyboardInterrupt:
-        pass
+    except Exception as e:
+        logger.error(f"Bot crashed: {e}")
 
 if __name__ == '__main__':
     main()
